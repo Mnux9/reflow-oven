@@ -1,33 +1,23 @@
-/*
-  SD card read/write
-
-  This example shows how to read and write data to and from an SD card file
-  The circuit. Pin numbers reflect the default
-  SPI pins for Uno and Nano models:
-   SD card attached to SPI bus as follows:
- ** SDO - pin 11
- ** SDI - pin 12
- ** CLK - pin 13
- ** CS - pin 4 (For For Uno, Nano: pin 10. For MKR Zero SD: SDCARD_SS_PIN)
-
-  created   Nov 2010
-  by David A. Mellis
-  modified  24 July 2020
-  by Tom Igoe
-
-  This example code is in the public domain.
-
-*/
 #include <SD.h>
 #include <LiquidCrystal.h>
+#include <TM1637Display.h>
+#include <TimeLib.h>
+#include <DS1307RTC.h>
 
-// inicializace LCD displeje
+//LCD:
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
-// nastavení čísla propojovacího pinu
-// pro osvětlení LCD displeje
+
+//SD card cs
 const int chipSelect = 10;
 
-byte thermometer[] = { // thermometer
+//7seg display
+#define CLK 2
+#define DIO 3
+
+TM1637Display segment(CLK, DIO);
+
+
+byte thermometer[] = {  // thermometer icon for lcd display
   B00100,
   B01010,
   B01010,
@@ -53,6 +43,7 @@ int csvDuration = 0;
 int realTemp = 20;
 int targetTemp = 0;
 
+tmElements_t tm;
 
 int buttonADC;
 
@@ -62,6 +53,8 @@ void setup() {
 
   lcd.begin(16, 2);
 
+  segment.showNumberDec(-999);
+
   lcd.setCursor(0, 0);
   lcd.print("  mnux");
   lcd.setCursor(0, 1);
@@ -69,26 +62,60 @@ void setup() {
 
 
   delay(500);
-  
+
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(" reflow");
   lcd.setCursor(0, 1);
   lcd.print("  oven");
   delay(500);
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("SELFTEST");
+  lcd.setCursor(0, 1);
+
+
+
+  //TESTING RTC
+  lcd.setCursor(0, 1);
+  lcd.print("        ");
+  lcd.setCursor(0, 1);
+  lcd.print("RTC:");
+
+  if (RTC.read(tm)) {
+    Serial.println("BATT OK");
+    lcd.setCursor(5, 1);
+    lcd.print("OK");
+  } else {
+    if (RTC.chipPresent()) {
+      lcd.setCursor(5, 1);
+      lcd.print("BAD");
+    } else {
+      lcd.setCursor(5, 1);
+      lcd.print("BAD");
+    }
+  }
+
+  delay(500);
 
   // wait for Serial Monitor to connect. Needed for native USB port boards only:
-  while (!Serial);
 
-  Serial.print("Initializing SD card...");
+
+
+
+  lcd.setCursor(0, 1);
+  lcd.print("        ");
+  lcd.setCursor(0, 1);
+  lcd.print("SD:");
 
   if (!SD.begin(chipSelect)) {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("ERROR:");
-    lcd.setCursor(0, 1);
-    lcd.print("no SD");
+    lcd.setCursor(4, 1);
+    lcd.print("BAD");
     while (true);
+  } else {
+    lcd.setCursor(4, 1);
+    lcd.print("OK");
   }
 
   Serial.println("initialization done.");
@@ -96,7 +123,7 @@ void setup() {
   lcd.clear();
 
   myFile = SD.open("file.csv");
-  
+
   display();
 
   lcd.setCursor(0, 1);
@@ -105,110 +132,109 @@ void setup() {
 
 void loop() {
 
-  buttonADC = analogRead (0);
+  buttonADC = analogRead(0);
 
   if (buttonADC < 800) {
-    Serial.println ("START BUTTON PRESSED ");
-    running=1;
+    Serial.println("START BUTTON PRESSED ");
+    running = 1;
     lcd.setCursor(0, 1);
     lcd.print("Started");
-
   }
-  
-  if(running==1){
+
+  if (running == 1) {
     getNewLine();
-    Line = "";
-    Serial.print(csvTime);
-    Serial.print(",");
-    Serial.println(csvTemp);
-    
-    if(csvTime == csvDuration){
+    //Serial.println(Line);
+    if (csvTime == csvDuration) {
       lcd.setCursor(0, 1);
       lcd.print("Done!   ");
       Serial.print("done!");
       getNewLine();
       Line = "";
-      running==0;
+      running == 1;
     }
-  } 
- 
-  delay(1000);
+  }
 
+  delay(1000);
 }
 
-char getNewLine(){
-  
+char getNewLine() {
+  Line = "";
+
   char currentCharRead = "";
 
   //Serial.println(currentCharRead);
   //Serial.println("getting new characters:");
-  while(1){
+  while (1) {
     currentCharRead = myFile.read();
 
     Line = Line + currentCharRead;
 
-    if(Line == "START;"){ //starts reflow cycle after "START;" appears in input file
-      Serial.println("Starting reflow cycle!!");
+    if (Line == "END;") {  //starts reflow cycle after "START;" appears in input file
+      Serial.println("Finished!!");
+
       break;
     }
+    if (Line == "START;") {  //starts reflow cycle after "START;" appears in input file
+      Serial.println("Starting reflow cycle!!");
 
-    if(Line.endsWith("LCD;")){ //sets LCD message after "LCD;" appears in input file
-      Serial.println("LCD: " + Line.substring(0,8));
-      lcd.setCursor(0, 1);
-      lcd.print(Line.substring(0,8));
-      
+      break;
     }
+    if (Line.endsWith("LCD;")) {  //sets LCD message after "LCD;" appears in input file
+      Serial.println("LCD: " + Line.substring(0, 8));
+      lcd.setCursor(0, 1);
+      lcd.print(Line.substring(0, 8));
 
-    if(Line.endsWith("DURATION;")){ //sets duration of the reflow cycle after "DURATION;" appears in input file
-      csvDuration = Line.substring(0,4).toInt();
+      break;
+    }
+    if (Line.endsWith("DURATION;")) {  //sets duration of the reflow cycle after "DURATION;" appears in input file
+      csvDuration = Line.substring(0, 4).toInt();
       Serial.print("Duration:");
       Serial.println(csvDuration);
+
       break;
     }
-    
 
-    if(currentCharRead == ','){//get 1st csv value
-      //Serial.println("comma detected");
-      csvTime = Line.toInt();
-      Line = "";
+    else {  //if line isnt a special command it gets csv values
 
-      
 
-      while(1){
+      if (currentCharRead == ',') {  //get 1st csv value
+        //Serial.println("comma detected");
+        csvTime = Line.toInt();
+        Serial.print("NEW TIME:");
+        Serial.println(csvTime);
+        Line = "";
+
+        while (1) {
           currentCharRead = myFile.read();
           Line = Line + currentCharRead;
-          
-          if(currentCharRead == ','){//get 2nd csv value TEMPATURE
+
+          if (currentCharRead == '\n') {  //get 2nd csv value TEMPATURE
             csvTemp = Line.toInt();
             lcd.setCursor(5, 0);
             lcd.print("   ");
             lcd.setCursor(5, 0);
             lcd.print(csvTemp);
+            Serial.print("NEW TEMP:");
+            Serial.println(csvTemp);
             Line = "";
             break;
           }
         }
-
-      
+      }
     }
 
-    if(currentCharRead == '\n'){ //stop when find new line
+    if (currentCharRead == '\n') {  //stop when find new line
       break;
     }
 
-    else{
-      
+    else {
     }
-    
   }
-
-
-  //return Line;
 }
 
 
-void display(){
-  Serial.print("rinngif display");
+void display() {
+  //Serial.print("rinngif display");
   lcd.createChar(0, thermometer);
   lcd.home();
   lcd.write(byte(0));
